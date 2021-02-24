@@ -1,0 +1,149 @@
+---
+title: "Assignment 1"
+output:
+  html_document:
+    df_print: paged
+---
+
+Goal: To a GEO data set, and clean, normalize and intepret it.
+
+## Clean the data and map to HUGO symbolst
+
+First, I picked the set GSE122002, however after reading over the paper and checking with Professor, the data set only provide in RAW. Thus I searched another data set which is GSE135339, POU2F3 is a master regulator of a tuft cell-like variant of small cell lung cancer. It provides txt files which I can further operate with. 
+
+```{r,message=FALSE}
+library(GEOmetadb)
+
+gse <- getGEO("GSE135339",GSEMatrix=FALSE)
+```
+Here are some basic information about the dataset:
+```{r}
+knitr::kable(data.frame((head(Meta(gse)))), format = "html")
+```
+```{r,echo=FALSE, message=FALSE}
+current_gpl <- names(GPLList(gse))[1]
+current_gpl_info <- Meta(getGEO(current_gpl))
+```
+
+
+**Platform title** : `r current_gpl_info$title`
+
+**Submission data** : `r current_gpl_info$submission_date`
+
+**Last update data** : `r current_gpl_info$last_update_date`
+
+**Organims**: `r current_gpl_info$organism` (taxid: 9606)
+
+**Number of GEO datasets that use this techology** : `r length(current_gpl_info$series_id)`
+
+**Number of GEO samples that use this technology** : `r length(current_gpl_info$sample_id)`
+
+To map to HUGO symbol:
+```{r,eval=FALSE}
+conversion_stash <- "ER_id_conversion.rds"
+if(file.exists(conversion_stash)){
+  ER_id_conversion <- readRDS(conversion_stash)
+  } else {
+    ER_id_conversion <- getBM(attributes = c("ensembl_gene_id","hgnc_symbol"),
+                                                    filters = c("ensembl_gene_id"),
+                                   values = ER_exp_filtered[,1],
+                                   mart = ensembl)  
+saveRDS(ER_id_conversion, conversion_stash)}
+```
+
+For the data set I have choose, I have no multiplicity, which each gene only have 1 appearance in each gene.
+```{R}
+sfiles = getGEOSuppFiles('GSE135339')
+fnames = rownames(sfiles)
+ER_exp = read.delim(fnames[1],header=TRUE, check.names = FALSE)
+knitr::kable(table(ER_exp[,1])[1:3], format="markdown")
+```
+
+To degine the group of the data set:
+```{r}
+samples <- data.frame(lapply(colnames(ER_exp)[2:13],
+                             FUN=function(x){
+                               unlist(strsplit(x, split = "\\_"))[c(2,3)]}))
+colnames(samples) <- colnames(ER_exp)[2:13]
+rownames(samples) <- c("patients","cell_type")
+samples <- data.frame(t(samples))
+```
+To filter out the duplicates:
+```{r,message=FALSE}
+library(edgeR)
+cpms = cpm(ER_exp[,2:13])
+rownames(cpms) <- ER_exp[,1]
+keep = rowSums(cpms >1) >=3
+ER_exp_filtered = ER_exp[keep,]
+```
+
+However, for my data set, I cannot filter out the data that is lower than 1, then i will have no data left, all mine data appear once. 
+
+## Normalization
+
+First, I distributed the data set I have got with normal distribution. 
+```{r}
+library(edgeR)
+data2plot <- log2(cpm(ER_exp_filtered[,2:13]))
+counts_density <- apply(log2(cpm(ER_exp_filtered[,2:13])), 2, density)
+xlim <- 0; ylim <- 0
+for (i in 1:length(counts_density)) { 
+  xlim <- range(c(xlim, counts_density[[i]]$x));
+  ylim <- range(c(ylim, counts_density[[i]]$y))
+}
+cols <- rainbow(length(counts_density))
+ltys <- rep(1, length(counts_density))
+plot(counts_density[[1]], xlim=xlim, ylim=ylim, type="n", 
+     ylab="Smoothing density of log2-CPM", main="", cex.lab = 0.8)
+for (i in 1:length(counts_density)) lines(counts_density[[i]],col = cols[i])
+legend("topright", colnames(data2plot),col=cols, lty=ltys, cex=0.5,
+       border ="blue",  text.col = "green4",merge = TRUE, bg = "gray90")
+```
+
+This is the pre-normalization graph.I choose to use normal distribution, because since my data do not have have a huge differences, and to visualize the data more clearly, I choose Normal distribution. For boxplot, I have tried to use it, however, since the data a really close, eye-balling the difference is really difficult. 
+Then, I used TMM Normalization, because it depends on samples.
+```{r}
+filtered_data_matrix <- as.matrix(ER_exp_filtered[,2:13])
+rownames(filtered_data_matrix) <- ER_exp_filtered[,1]
+d = DGEList(counts=filtered_data_matrix, group=samples$cell_type)
+d = calcNormFactors(d)
+normalized_counts <- cpm(d)
+counts_density <- apply(log2(normalized_counts), 2, density)
+xlim <- 0; ylim <- 0
+for (i in 1:length(counts_density)) { 
+  xlim <- range(c(xlim, counts_density[[i]]$x));
+  ylim <- range(c(ylim, counts_density[[i]]$y))
+}
+cols <- rainbow(length(counts_density))
+ltys <- rep(1, length(counts_density))
+plot(counts_density[[1]], xlim=xlim, ylim=ylim, type="n", 
+     ylab="Smoothing density of log2-CPM", main="", cex.lab = 0.8)
+for (i in 1:length(counts_density)) lines(counts_density[[i]],col = cols[i])
+legend("topright", colnames(data2plot),col=cols, lty=ltys, cex=0.5,
+       border ="blue",  text.col = "green4",merge = TRUE, bg = "gray90")
+```
+
+This is the distribution after normalizing the data.And to define the relation of the data sets, I have applied MD plots
+```{r}
+plotMDS(d, labels = rownames(samples),col = c("darkgreen","blue")[factor(samples$cell_type)])
+```
+
+In the MD plot, the most of the replications have are similar in the graph, but some is not, and base on the article, the comparison is wild type, vector type and under vehicle condition. 
+
+Then I plotted the BCV graph for dispersion, and plotted mean-variance relation graph.
+```{r}
+model_design <- model.matrix(~samples$patients + samples$cell_type+0)
+d <- estimateDisp(d, model_design)
+plotBCV(d,col.tagwise = "black",col.common = "red",)
+plotMeanVar(d, show.raw.vars = TRUE, show.tagwise.vars=TRUE,
+            show.ave.raw.vars = TRUE, NBline=FALSE,
+            show.binned.common.disp.vars = FALSE)
+```
+
+## Interpret, and document
+The control of this test data normal cells with E2 enhancement or not to record Estrogen receptor alpha, and the test conditions are the cells with breat cancer with E2 enhancement ot not. This data set is interesting to me, because personally, I'm interested in beast cancers,and it can somhow suppress the tracription for target cell. For this set of data, I did not find not unique specific genes, all of them are unique from my research. and fot the symbols to map to HUGO symbols, all of them matched to the HUGO symbol.For outliers, I removed in total of one, and for replicates I just filtered them out. The coverage of the dataset were 100% at mine data set.  
+
+## Citations
+
+Mei,Y.,Ji H. L.,Zhao, Z.,Wenbo L.,Michael, G.et al.Enhancer RNAs Mediate Estrogen-Induced Decommissioning of Selective Enhancers by Recruiting ERα and Its Cofactor.The Author(s)(2020)https://www.cell.com/action/showPdf?pii=S2211-1247%2820%2930784-1
+
