@@ -1,0 +1,380 @@
+---
+title: "A2_JulianaChu"
+subtitle: GSE135339,Enhancer RNAs Mediate Estrogen-Induced Decommissioning of Selective
+  Enhancers by Recruiting ERa and Its Cofactor
+output:
+  html_document:
+    df_print: paged
+  df_print: paged
+  html_notebook: null
+
+---
+---
+```{r setup, echo=FALSE, message=FALSE}
+if (!requireNamespace("BiocManager", quietly = TRUE))    
+  install.packages("BiocManager")
+if (!requireNamespace("GEOmetadb", quietly = TRUE))    
+  BiocManager::install("GEOmetadb")
+if (!requireNamespace("biomaRt", quietly = TRUE))
+  BiocManager::install("biomaRt")
+if (!requireNamespace("ComplexHeatmap", quietly = TRUE))
+  BiocManager::install("ComplexHeatmap")
+if (!requireNamespace("DBI", quietly = TRUE))
+  install.packages("DBI")
+if (!requireNamespace("edgeR", quietly = TRUE))
+  install.packages("edgeR")
+if (!requireNamespace("limma", quietly = TRUE))
+  install.packages("limma")
+if (!requireNamespace("ggplot2", quietly = TRUE))
+  install.packages("ggplot2")
+if (!requireNamespace("tidyr", quietly = TRUE))
+  install.packages("tidyr")
+if (!requireNamespace("cowplot", quietly = TRUE))
+  install.packages("cowplot")
+if (!requireNamespace("circlize", quietly = TRUE))
+  install.packages("circlize")
+if (!requireNamespace("knitr", quietly = TRUE))
+  install.packages("knitr")
+library(edgeR)
+```
+GOAL: To rank my genes according to differential expression,and perform thresholded over-representation analysis to highlight dominant themes in my top set of genes.
+
+## Introduction
+For the data I chosed from GEO is set GSE135339, this is a set of data which intercates a group of eRNAs that are actively involved in gene repression. The groups are treated with vehcile condition which enhancers in the absence, or presence (E2) of estradiol.
+First, I loaded the data from assignment1, then created a matrix preparing for HeapMap.
+```{r, warning=FALSE}
+
+normalized_count_data <- readRDS(file=file.path(getwd(),"normalized_counts.rds"))
+
+#to omit NA for generating heatmap
+normlized_count_nona <- na.omit(normalized_count_data)
+# Grouping the data
+samples <- data.frame(lapply(colnames(normlized_count_nona)[3:14], 
+                             FUN=function(x){
+                               unlist(strsplit(x, split = "\\_"))[c(1,2)]}))
+colnames(samples) <- colnames(normlized_count_nona)[3:14]
+rownames(samples) <- c("sample_type", "treatment_type")
+samples <- data.frame(t(samples))
+```
+
+```{r heatmap, warning=FALSE, message=FALSE, tidy=TRUE}
+# Create heatmap from previous data
+heatmap_matrix <- normlized_count_nona[,3:ncol(normlized_count_nona)]
+rownames(heatmap_matrix) <- normlized_count_nona$ensembl_gene_id
+colnames(heatmap_matrix) <- colnames(normlized_count_nona[,3:ncol(
+  normlized_count_nona)])
+
+heatmap_col = circlize::colorRamp2(c(min(heatmap_matrix), 0,           
+                             max(heatmap_matrix)), c("blue", "white", "red"))  
+overall_heatmap <- ComplexHeatmap::Heatmap(as.matrix(heatmap_matrix),      
+                           show_row_dend = TRUE,show_column_dend = TRUE,       
+                           col=heatmap_col,show_column_names = TRUE,       
+                           show_row_names = FALSE,show_heatmap_legend = TRUE)
+```
+![Pregenerated heatmap for all genes](overall_heatmap.png)
+
+From the Heapmap, we can see that there are some gene expression variations between different treatments and sample types. Then differential gene expression analysis is necessary. 
+
+```{r MDS, warning=FALSE, tidy=TRUE}
+# Label the MDS plots by patient type
+limma::plotMDS(heatmap_matrix,
+               labels= samples$sample_type, 
+               col = unlist(rainbow(20))[factor(samples$sample_type)],
+               main = "MDS plot by patient type")
+# Label the MDS plots by treatment type
+limma::plotMDS(heatmap_matrix,
+               labels= samples$treatment_type,
+               col = unlist(rainbow(20))[factor(samples$treatment_type)],
+               main = "MDS plot by Treatment type")
+```
+The two MDS plots shows variations between sample types and treatment types. we can see that the clustering between different treatmeent is closer than different patient type. Then, the treatment should effect on every type of patient from visualizing. 
+
+# Differential Gene Expression
+
+## Create Model
+
+```{r model, warning=FALSE, tidy=TRUE}
+# Design differential expression model according to sample type for limma
+model_design <- model.matrix(~ samples$sample_type)
+expressionMatrix <- as.matrix(normlized_count_nona[,3:14])
+rownames(expressionMatrix) <- normlized_count_nona$ensembl_gene_id
+colnames(expressionMatrix) <- colnames(normlized_count_nona)[3:14]
+minimalSet <- Biobase::ExpressionSet(assayData=expressionMatrix)
+fit <-limma::lmFit(minimalSet, model_design)
+fit2 <- limma::eBayes(fit,trend=TRUE)
+topfit <- limma::topTable(fit2, coef=ncol(model_design),adjust.method = "BH",
+                   number = nrow(expressionMatrix))
+output_hits_pat_s <- merge(normlized_count_nona[,1:2],topfit,by.y=0,by.x=2,
+                         all.y=TRUE)
+# Sort by P-value
+output_hits_pat_s <- output_hits_pat_s[order(output_hits_pat_s$P.Value),]
+# Visualization
+knitr::kable(output_hits_pat_s[1:10,2:8],type="html",row.names = FALSE, 
+             caption = "Fitted with sample type by limma")
+#Number of gene pass the threshold p-value < 0.001
+length(which(output_hits_pat_s$P.Value < 0.001))
+# Number of gene pass genes pass correction
+length(which(output_hits_pat_s$adj.P.Val < 0.05))
+
+# Design differential expression model according to cell type + patient
+model_design_pat <- model.matrix(
+  ~ samples$sample_type + samples$treatment_type)
+fit_pat <- limma::lmFit(minimalSet, model_design_pat)
+fit2_pat <- limma::eBayes(fit_pat,trend=TRUE)
+topfit_pat <- limma::topTable(fit2_pat,
+                       coef=ncol(model_design_pat),
+                       adjust.method = "BH",
+                       number = nrow(expressionMatrix))
+output_hits_pat <- merge(normalized_count_data[,1:2],
+                         topfit_pat,by.y=0,by.x=2,all.y=TRUE)
+output_hits_pat <- output_hits_pat[order(output_hits_pat$P.Value),]
+# Showcase data
+knitr::kable(output_hits_pat[1:10,2:8],
+             type="html",
+             row.names = FALSE,
+             caption = "Fitted with sample &treatment type by limma")
+#Number of gene pass the threshold p-value < 0.001
+length(which(output_hits_pat$P.Value < 0.001))
+# Number of gene pass genes pass correction
+length(which(output_hits_pat$adj.P.Val < 0.05))
+
+# Setup the model for EdgeR\
+model_design_pat <- model.matrix(  ~ samples$sample_type)
+d <- edgeR::DGEList(counts=filtered_data_matrix, group=samples$cell_type)
+d <- edgeR::estimateDisp(d, model_design_pat)
+# fit the data
+fit <- edgeR::glmQLFit(d, model_design_pat)
+qlf.fit <- edgeR::glmQLFTest(fit, coef='samples$sample_typeVector')
+knitr::kable(topTags(qlf.fit), type="html",row.names = FALSE,
+             caption = "By sample type with edgeR")
+
+qlf_output_hits <- edgeR::topTags(qlf.fit ,sort.by = "PValue",
+                           n = nrow(normlized_count_nona))
+#Number of gene pass the threshold p-value < 0.001
+length(which(qlf_output_hits$table$PValue < 0.001))
+# Number of gene pass genes pass correction
+length(which(qlf_output_hits$table$FDR < 0.05))
+```
+
+#### Q1:Calculate p-values for each of the genes in your expression set. How many genes were significantly differentially expressed? What thresholds did you use and why?
+
+I have calculated p-value for each gene using Limma. I choose to use 0.1% as my threhold for this data, because I checked 5% and 1%, both of them have large results, then since thet are all significant, i want to know the statistically highly significant at 0.1%.
+
+#### Q2: Multiple hypothesis testing - correct your p-values using a multiple hypothesis correction method. Which method did you use? And Why? How many genes passed correction?
+
+I used empirical Bayes moderation to compute with model build in limma and use quasi-likelihood generalized log-linear model for multiple hypothesis correction. 
+
+For using just patient in the modle by limma, it labels 5116 genes with significant adjusted p values from the analysis, and for the complex model with use patient and treatment by limma labels 366genes. Also, by edgeR using patient, generated a simple model with produce 1348 genes with significant adjusted p values.
+
+# Module Selection
+
+## Compare between Simple and Complex with Limma
+
+```{r message=TRUE, warning=FALSE, tidy=TRUE}
+filtered_data_matrix <- load("filtered_data_matrix.RData")
+simple_model_pvalues <- data.frame(ensembl_id =
+                                     output_hits_pat_s$ensembl_gene_id,
+                                   simple_pvalue=output_hits_pat_s$P.Value)
+pat_model_pvalues <-  data.frame(ensembl_id = 
+                                   output_hits_pat$ensembl_gene_id,
+                                 patient_pvalue = output_hits_pat$P.Value)
+two_models_pvalues <- merge(simple_model_pvalues,
+                            pat_model_pvalues,by.x=1,by.y=1)
+
+# Plot
+two_models_pvalues$colour <- "black"
+two_models_pvalues$colour[two_models_pvalues$simple_pvalue<0.05] <- "orange"
+two_models_pvalues$colour[two_models_pvalues$patient_pvalue<0.05] <- "blue"
+two_models_pvalues$colour[two_models_pvalues$simple_pvalue<0.05 & 
+                            two_models_pvalues$patient_pvalue<0.05] <- "red"
+plot(two_models_pvalues$simple_pvalue,two_models_pvalues$patient_pvalue,
+     col = two_models_pvalues$colour,xlab = "simple model p-values",
+     ylab ="Patient model p-values",main="Simple vs Patient Limma")
+legend("topleft",inset=.01,
+       legend=c("Simple", "Complex", "Both", "Not Signif"), 
+       fill = c("orange", "blue", "red", "black"))
+
+
+
+#highlight the gene used in the study
+emsembl_of_interest <- normlized_count_nona$ensembl_gene_id[
+  which(normlized_count_nona$hgnc_symbol == "EFEMP1"|
+          normlized_count_nona$hgnc_symbol == "TM4SF1" )]
+two_models_pvalues$colour <- "grey"
+two_models_pvalues$colour[two_models_pvalues$ensembl_id==
+                            emsembl_of_interest] <- "red"
+plot(two_models_pvalues$simple_pvalue, two_models_pvalues$patient_pvalue, col = two_models_pvalues$colour,xlab = "simple model p-values", ylab ="Patient model p-values", main="Simple vs Patient Limma")
+points(two_models_pvalues[which(
+  two_models_pvalues$ensembl_id == emsembl_of_interest),2:3],
+  pch=20, col="red", cex=1.5)
+legend("topleft",inset=.01, legend=c("EFEMP1|TM4SF1", "rest"),
+       fill = c("red", "grey"))
+```
+
+Using the p-values we generated from the precious section, the comaprion model is been generated to visualize the relationship between two. Where there is only partial data which is closer to 0 that is in both dataset. Additionally, eRNAs of TM4SF1 and EFEMP1, these are the highlighted genes stated in the research, are labeled in the second plot.
+
+## Limma vs Quasi liklihood
+
+```{r message=TRUE, warning=FALSE, tidy=TRUE}
+# Compare Limma with Quasi(EdgeR)
+qlf_pat_model_pvalues <- data.frame(hgnc_id = rownames(qlf_output_hits$table),qlf_patient_pvalue=qlf_output_hits$table$PValue)
+limma_pat_model_pvalues <- data.frame(hgnc_id = output_hits_pat$hgnc_symbol,limma_patient_pvalue = output_hits_pat$P.Value)
+two_models_pvalues <- merge(qlf_pat_model_pvalues,
+                            limma_pat_model_pvalues,
+                            by.x=1,by.y=1)
+two_models_pvalues$colour <- "black"
+two_models_pvalues$colour[two_models_pvalues$qlf_patient_pvalue 
+                          <0.05] <- "orange"
+two_models_pvalues$colour[two_models_pvalues$limma_patient_pvalue
+                          <0.05] <- "blue"
+two_models_pvalues$colour[two_models_pvalues$qlf_patient_pvalue
+                          <0.05 & two_models_pvalues$limma_patient_pvalue
+                          <0.05] <-"red"
+plot(two_models_pvalues$qlf_patient_pvalue,
+     two_models_pvalues$limma_patient_pvalue,
+     col = two_models_pvalues$colour,
+     xlab = "QLF patient model p-values",
+     ylab ="Limma Patient model p-values",
+     main="QLF vs Limma (sample type)")
+legend("topleft",inset=.01, legend=c("Simple", "Complex", "Both", "Not Signif"), 
+       fill = c("orange", "blue", "red", "black"))
+```
+
+```{r message=TRUE}
+#Highlight the gene in study
+hgnc_of_interest <- normlized_count_nona$hgnc_symbol[
+  which(normlized_count_nona$hgnc_symbol == "EFEMP1"|
+          normlized_count_nona$hgnc_symbol == "TM4SF1" )]
+two_models_pvalues$colour <- "grey"
+two_models_pvalues$colour[two_models_pvalues$hgnc_id==hgnc_of_interest] <- "red"
+plot(two_models_pvalues$qlf_patient_pvalue,
+     two_models_pvalues$limma_patient_pvalue,
+     col = two_models_pvalues$colour,
+     xlab = "QLF patient model p-values",
+     ylab ="Limma Patient model p-values",
+     main="QLF vs Limma")
+points(two_models_pvalues[
+  two_models_pvalues$hgnc_id==hgnc_of_interest,2:3],
+  pch=24,  col="red", cex=1.5)
+legend("topleft",inset=.01, legend=c("EFEMP1|TM4SF1", "rest"),
+       fill = c("red", "grey"))
+```
+For the model generated by QLF and Limma has more similarist to the complex model from the previous section. From the scatter point, the gene were similar to the model genertated from limma.
+
+##  MA Plot 
+```{r message=TRUE, warning=FALSE}
+# plots from samples_type edgeR 
+E2 <- normlized_count_nona[,grep("E2", colnames(normlized_count_nona))]
+Veh <-normlized_count_nona[,grep("Veh", colnames(normlized_count_nona))]
+data_avg <- data.frame(hgnc_symbol = normlized_count_nona$hgnc_symbol,
+                       E2 = rowMeans(E2), Veh = rowMeans(Veh))
+qlf_output <- cbind(qlf_output_hits$table,
+                       hgnc_symbol = rownames(qlf_output_hits$table))
+normlized_qlf <- merge(data_avg, qlf_output, by.x= "hgnc_symbol",
+                       by.y="hgnc_symbol", all=TRUE)
+under_exp <- sum(normlized_qlf$logFC < 0 & normlized_qlf$PValue < 0.001)
+over_exp <- sum(normlized_qlf$logFC > 0 & normlized_qlf$PValue < 0.001)
+status <- rep(0, nrow(normlized_qlf))
+status[normlized_qlf$logFC < 0 & normlized_qlf$PValue < 0.001] <- -1
+status[normlized_qlf$logFC > 0 & normlized_qlf$PValue < 0.001] <- 1
+plotMD(log2(normlized_qlf[,c(2,3)]), status=status, values=c(-1,1),
+       hl.col=c("blue","red"), main = "MA plots (sign gene with edgeR)")
+```
+```{r message=TRUE, warning=FALSE}
+# Plots from samples_type + patient model(Limma)
+result.fit <- decideTests(fit2_pat)
+par(mfrow=c(1,2))
+plotMD(fit2_pat, status=result.fit[,"samples$sample_typeWT"], values = c(-1, 1), hl.col=c("blue","red"), main = "MA plots for Vector vs WT ")
+
+plotMD(fit2_pat, status=result.fit[,"samples$treatment_typeVeh"], values = c(-1, 1), hl.col=c("blue","red"), main = "MA plots for Vector vs Veh ")
+
+```
+#### Q3:how the amount of differentially expressed genes using an MA Plot or a Volcano plot. Highlight genes of interest.
+I have plotted the MA plot at above using edgeR, `r under_exp` downregulated gene were labeled in blue, and `r over_exp` upregulated gene are labeled in red. In addtion, I also plotted Vector vs WT and Vector vs Veh, to have a better visualization about which is changing more. 
+
+## HeapMap
+
+```{r message=FALSE, warning=FALSE}
+# Subset the threshold gene
+top_hits <- qlf_output$hgnc_symbol[qlf_output$PValue < 0.001]
+# Create and order the heatmap matrix
+heatmap_matrix_tophits <- t(
+  scale(t(heatmap_matrix[which(rownames(heatmap_matrix)
+                              %in% normlized_count_nona$ensembl_gene_id),])))
+heatmap_matrix_tophits<- heatmap_matrix_tophits[,
+                          c(grep("E2",colnames(heatmap_matrix_tophits)),
+                            grep("Veh",colnames(heatmap_matrix_tophits)))]
+if(min(heatmap_matrix_tophits) == 0){
+  heatmap_col = colorRamp2(c( 0, max(heatmap_matrix_tophits)),
+                           c( "white", "red"))  
+} else {
+    heatmap_col = colorRamp2(c(min(heatmap_matrix_tophits), 0,
+                               max(heatmap_matrix_tophits)),
+                             c("blue", "white", "red"))  }
+Heatmap(as.matrix(heatmap_matrix_tophits),
+        cluster_rows = TRUE,
+        cluster_columns = FALSE,
+        how_row_dend = TRUE,
+        show_column_dend = FALSE,
+        col=heatmap_col,
+        show_column_names = TRUE,
+        show_row_names = FALSE,
+        show_heatmap_legend = TRUE,
+        )
+
+```
+![](HeapMap_sum.png)
+
+#### Q4:Visualize your top hits using a heatmap. Do you conditions cluster together? Explain why or why not.
+Part of my condition cluster together,for E2 condition in dDBD it showed a difference which DBD-truncated ERα was not able to bind to E2-repressed enhancers, thus it was expected that in E2 conditon, dDBD will have different result as other.
+
+# Thresholded over-representation analysis
+
+```{r message=TRUE, warning=FALSE}
+upregulated_genes <- qlf_output$hgnc_symbol[which(qlf_output$PValue < 0.001 &
+                                                    qlf_output$logFC >0)]  
+downregulated_genes <-qlf_output$hgnc_symbol[which(qlf_output$PValue < 0.001 &
+                                                    qlf_output$logFC < 0)] 
+write.table(x=upregulated_genes,
+            file=file.path("ER_upregulated_genes.txt"),sep = "\t",
+            row.names = FALSE,col.names = FALSE,quote = FALSE)
+write.table(x=downregulated_genes,
+            file=file.path("ER_downregulated_genes.txt"),sep = "\t",
+            row.names = FALSE,col.names = FALSE,quote = FALSE)
+```
+
+
+#### Q1: Which method did you choose and why?
+I used G:Profiler[@gProfiler] as the tool and used threhold Benjamini-Hochberg FDR. I choose g:profiler because it is continously updated with new data from Ensembl and WormBase ParaSite, and have multiple human genome databases to operate for. Then, I will know very soon if their are new data might fit to data set.
+
+#### Q2: What annotation data did you use and why? What version of the annotation are you using?
+I used 4 annotation data:GO: Biological Process(Release 2020-12-08 [@GO]),KEGG(Release 2020-12-14 [@KEGG]),Reactome(Release 2020-12-15 [@Reactome]() and WikiPathways(Release 2020-12-10 [@WP]). 
+All of these are biological pathways, it can fullfill the biological process. Since, for the dataset, it is considering the pathways associated with ER alpha.
+#### Q3: How many genesets were returned with what thresholds?
+I used 1% threshodls, and it returned 1371 genesets under GO, 114 under KEGG, 473 under REAC and 98 under WP.
+![g:Profiler 1% thresholded for all ](image/gProfiler_all.png)
+![g:Profiler 1% thresholded for all(detailed)](image/gprofiler_all_detailed.png)
+
+
+#### Q4: Run the analysis using the up-regulated set of genes, and the down-regulated set of genes separately. How do these results compare to using the whole list (i.e all differentially expressed genes together vs. the up-regulated and down regulated differentially expressed genes separately)?
+![g:Profiler 1% thresholded for downregualted](image/gProfiler_downregulated.png)
+![g:Profiler 1% thresholded for downregulated(detailed)](image/gProfiler_downregulated_detail.png)
+![g:Profiler 1% thresholded for downregulated](image/gProfiler_upregulated_detail.png)
+![g:Profiler 1% thresholded for upregulated(detailed)](image/gProfiler_upregulated.png)
+From the result, upregulated is less significant than the downregulted genesets. Downregulated had much more genesets than up-regulated. This means there are many upregulated geneset in the patient type. This can due to randomness, which it has more than one pathway. 
+
+# Interpretation
+#### Q1: Do the over-representation results support conclusions or mechanism discussed in the original paper?
+Yes, from the my analysis, the results supports the conclusion for the original paper, where in the articles it said "dismisses RNA polymerase II from designated enhancers and suppresses the transcription of target genes", which showed by testing then in the E2 and Veh conditions. These has shown in my results that there are upregulations and downregulations exist, by different treatment. 
+
+#### Q2: Can you find evidence, i.e. publications, to support some of the results that you see. How does this evidence support your results.
+I have found an articles that says EFEMP1 can be repressed by estrogen, and it can inhibit the pithelial-mesenchymal transition, which this gene were a test gene in the article, which helped identified the regulations, also the articles that has support for ER alpha is associated breast cancer, which is an initial research starting point of the reseach.
+
+# Reference:
+1. Mei,Y.,Ji H. L.,Zhao, Z.,Wenbo L.,Michael, G.et al.Enhancer RNAs Mediate Estrogen-Induced Decommissioning of Selective Enhancers by Recruiting ERα and Its Cofactor.The Author(s)(2020)"https://www.cell.com/action/showPdf?pii=S2211-1247%2820%2930784-1"
+2. Uku Raudvere, Liis Kolberg, Ivan Kuzmin, Tambet Arak, Priit Adler, Hedi Peterson, Jaak Vilo: g:Profiler: a web server for functional enrichment analysis and conversions of gene lists (2019 update) Nucleic Acids Research 2019; doi:10.1093/nar/gkz369 [PDF].
+3. Tingting,Y.Huilin,Z. Haifen Q..Bilan L.Jingyun, W. Guiqiang, D. Chune R.Xiaoping, W.EFEMP1 is repressed by estrogen and inhibits the epithelial-mesenchymal transition via Wnt/β-catenin signaling in endometrial carcinoma.Oncotarget.(2016) https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5041938/
+4.Williams,C.Edvardsson,K, SA Lewandowski, A Stro ̈ m and J-A Gustafsson.A genome-wide study of the repressive effects of estrogen receptor beta on estrogen receptor alpha signaling in breast cancer cells.Oncogene (2008) "https://www.nature.com/articles/1210712.pdf?origin=ppub"
+
+
+
