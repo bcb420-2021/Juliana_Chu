@@ -18,10 +18,15 @@ knitr::opts_chunk$set(echo = TRUE)
 # Non-thresholded Gene set Enrichment Analysis
 
 ## 1.What method did you use? What genesets did you use? Make sure to specify versions and cite your methods.
+
 I used GSEA [@gsea1, @gsea2] with the following parameters:
+
 * Number of permutations: 1000
+
 * Max size: 250
+
 * Min size: 15
+
 * Version: 4.1.0
 
 Also, used the Human GO Biological Pathways geneset curated by Bader Lab on March 1, 2021, obtained [here](http://download.baderlab.org/EM_Genesets/March_01_2021/Human/symbol/) [@bader_genesets].
@@ -39,22 +44,25 @@ From both tools it shows the under regulation is more than upregulation. From th
 ## 1. Create an enrichment map - how many nodes and how many edges in the resulting map? What thresholds were used to create this map? Make sure to record all thresholds. Include a screenshot of your network prior to manual layout.
 
 46 nodes and 47 edges. The following thresholds were used:
+
 * FDR q-value cutoff: 0.1
+
 * p-value cutoff: 1.0
+
 * Metric: Jaccard+Overlap cutoff at 0.5 for sparser graph
 
-![](analysis_.GseaPreranked.1617492650837/edb/analysis_.GseaPreranked.png)
+![Figure1: Screenshot of the network](analysis_.GseaPreranked.1617492650837/edb/analysis_.GseaPreranked.png)
 
 
 ## 2. Annotate your network - what parameters did you use to annotate the network. If you are using the default parameters make sure to list them as well.
 
-![](analysis_.GseaPreranked.1617492650837/edb/annatation_parameter.png)
+![Figure 2: Parameter of the annotation](analysis_.GseaPreranked.1617492650837/edb/annatation_parameter.png)
 
-![](analysis_.GseaPreranked.1617492650837/edb/analysis_.GseaPrerankedannatation.png)
+![Figure 3:annotated network](analysis_.GseaPreranked.1617492650837/edb/analysis_.GseaPrerankedannatation.png)
 
 ## 3.Make a publication ready figure - include this figure with proper legends in your notebook.
 
-![cluster](analysis_.GseaPreranked.1617492650837/edb/cluster.png)
+![Figure 4: themes in the network](analysis_.GseaPreranked.1617492650837/edb/cluster.png)
 
 ## 4.Collapse your network to a theme network. What are the major themes present in this analysis? Do they fit with the model? Are there any novel pathways or themes?
 
@@ -67,12 +75,15 @@ The enrichment results support the conclusions in the original paper. The enrich
 
 
 ## 2.Can you find evidence, i.e. publications, to support some of the results that you see. How does this evidence support your result?
-
+The down-regulation is proven in the article,in Hatsumi, et al.'s article, the downregulation of estrogen receptor gene expression by 17beta-estradiol is been proven, however, this experiment is not done in human but in lactating mice. This supports my result, because in the experiment, the estradiol is proven to downregulate ER, in human, then this article has the similar result in mice. 
 
 ## Add a post analysis to your main network using specific transcription factors, microRNAs or drugs. Include the reason why you chose the specific miRs, TFs or drugs (i.e publications indicating that they might be related to your model). What does this post analysis show?
 
 I choose estradiol for my post analysis, because for the paper, it was looking how estradiol can change the Estrogen-induced metabolism. I searched using MSigDB, and found there is a gene set that is bound by ESR1 and down-regulated by estradiol in breast cancer.(https://www.gsea-msigdb.org/gsea/msigdb/geneset_page.jsp?geneSetName=BHAT_ESR1_TARGETS_NOT_VIA_AKT1_DN&keywords=estradiol )
 
-![post analysis with estradiol](analysis_.GseaPreranked.1617492650837/Post_analysis.png)
+![Figure 5:post analysis with estradiol](analysis_.GseaPreranked.1617492650837/Post_analysis.png)
+
 # Reference:
-1. Mei,Y.,Ji H. L.,Zhao, Z.,Wenbo L.,Michael, G.et al.Enhancer RNAs Mediate Estrogen-Induced Decommissioning of Selective Enhancers by Recruiting ERα and Its Cofactor.The Author(s)(2020)"https:/www.cell.com/action/showPdf?pii=S2211-1247%2820%2930784-1 "
+
+1. Mei,Y.,Ji H. L.,Zhao, Z.,Wenbo L.,Michael, G.et al.Enhancer RNAs Mediate Estrogen-Induced Decommissioning of Selective Enhancers by Recruiting ERα and Its Cofactor.The Author(s)(2020)"https://www.cell.com/action/showPdf?pii=S2211-1247%2820%2930784-1"
+2. Hatsumi T, Yamamuro Y. Downregulation of estrogen receptor gene expression by exogenous 17beta-estradiol in the mammary glands of lactating mice. Exp Biol Med (Maywood). 2006 Mar;231(3):311-6. doi: 10.1177/153537020623100311. PMID: 16514178.
